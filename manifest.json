@@ -1,0 +1,10 @@
+{
+  "id": "graph-view-evolution",
+  "name": "Graph View Evolution",
+  "version": "1.0.0",
+  "minAppVersion": "1.4.0",
+  "description": "Canvas-style graph navigation with MD preview cards. No physics simulation.",
+  "author": "cruzchqn",
+  "authorUrl": "https://github.com/cruzchqn",
+  "isDesktopOnly": true
+}
