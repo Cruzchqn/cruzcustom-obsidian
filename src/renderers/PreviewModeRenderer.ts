@@ -2,6 +2,8 @@ import { App, Component, TFile } from "obsidian";
 import { GraphState } from "../types";
 import { NodeCard } from "../components/NodeCard";
 
+const HINT_DISMISSED_KEY = "gev-hint-dismissed";
+
 export class PreviewModeRenderer extends Component {
   private wrapperEl: HTMLElement;
   private svgEl: SVGSVGElement;
@@ -13,7 +15,9 @@ export class PreviewModeRenderer extends Component {
     private readonly parentComponent: Component,
     private readonly onNavigate: (file: TFile) => void,
     private readonly onBackgroundClick: () => void,
-    private readonly onOverflowDotClick: (file: TFile) => void
+    private readonly onOverflowDotClick: (file: TFile) => void,
+    private readonly onMoreClick: () => void,
+    private readonly onBackClick: (() => void) | null
   ) {
     super();
     this.wrapperEl = containerEl.createEl("div", {
@@ -27,12 +31,16 @@ export class PreviewModeRenderer extends Component {
     this.svgEl.classList.add("gev-svg-overlay");
     this.wrapperEl.appendChild(this.svgEl);
 
-    this.wrapperEl.addEventListener("mousedown", (e) => {
+    // B4: use click (not mousedown) and check .closest() to avoid conflicts
+    this.wrapperEl.addEventListener("click", (e) => {
       const target = e.target as Element;
       if (
-        target === this.wrapperEl ||
-        target === this.svgEl ||
-        target.classList.contains("gev-svg-overlay")
+        !target.closest(".gev-node-card") &&
+        !target.closest(".gev-overflow-dot") &&
+        !target.closest(".gev-more-btn") &&
+        !target.closest(".gev-back-btn") &&
+        !target.closest(".gev-hint-bar") &&
+        !target.closest(".gev-suggested-banner")
       ) {
         this.onBackgroundClick();
       }
@@ -40,7 +48,7 @@ export class PreviewModeRenderer extends Component {
   }
 
   async render(state: GraphState): Promise<void> {
-    this.clearCards();
+    this.clearAll();
     while (this.svgEl.firstChild) this.svgEl.removeChild(this.svgEl.firstChild);
 
     const w = this.wrapperEl.clientWidth || 800;
@@ -48,9 +56,8 @@ export class PreviewModeRenderer extends Component {
     const centerPos = { x: w / 2, y: h / 2 };
     const radius = Math.min(w, h) * 0.34;
 
-    const surroundCount = state.surroundingFiles.length;
     const surroundPositions = computeCircularPositions(
-      surroundCount,
+      state.surroundingFiles.length,
       centerPos,
       radius
     );
@@ -91,22 +98,27 @@ export class PreviewModeRenderer extends Component {
     }
 
     if (state.overflowFiles.length > 0) {
-      this.renderOverflowDots(
-        state.overflowFiles,
-        centerPos,
-        radius,
-        w,
-        h
-      );
+      this.renderOverflowDots(state.overflowFiles, centerPos, radius, w, h);
     }
 
-    const totalOverflow =
-      state.overflowFiles.length > 0 ? state.overflowFiles.length : 0;
-    const hasSearchMode =
-      totalOverflow >= 20 - 8;
+    // B1: "もっと見る" uses onMoreClick (not onBackgroundClick)
+    if (state.overflowFiles.length >= 12) {
+      this.renderMoreButton(state);
+    }
 
-    if (hasSearchMode && state.overflowFiles.length >= 12) {
-      this.renderMoreButton(state, w, h);
+    // U3: back button
+    if (this.onBackClick) {
+      this.renderBackButton();
+    }
+
+    // U6: suggested banner
+    if (state.isSuggested) {
+      this.renderSuggestedBanner();
+    }
+
+    // U1: hint bar (first-time only)
+    if (!localStorage.getItem(HINT_DISMISSED_KEY)) {
+      this.renderHintBar();
     }
   }
 
@@ -127,6 +139,8 @@ export class PreviewModeRenderer extends Component {
       const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
       g.setAttribute("class", "gev-overflow-dot");
       g.style.cursor = "pointer";
+      // B2: override SVG-level pointer-events so dots are clickable
+      g.style.pointerEvents = "all";
 
       const circle = document.createElementNS(
         "http://www.w3.org/2000/svg",
@@ -155,25 +169,49 @@ export class PreviewModeRenderer extends Component {
     }
   }
 
-  private renderMoreButton(
-    state: GraphState,
-    w: number,
-    h: number
-  ): void {
+  private renderMoreButton(state: GraphState): void {
     const btn = this.wrapperEl.createEl("button", {
       cls: "gev-more-btn",
       text: `もっと見る (+${state.overflowFiles.length} 件)`,
     });
-    btn.style.position = "absolute";
-    btn.style.bottom = "16px";
-    btn.style.right = "16px";
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      this.onBackgroundClick();
+      // B1: was incorrectly calling onBackgroundClick; now calls onMoreClick
+      this.onMoreClick();
     });
   }
 
-  private clearCards(): void {
+  private renderBackButton(): void {
+    const btn = this.wrapperEl.createEl("button", {
+      cls: "gev-back-btn",
+      text: "← 戻る",
+    });
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.onBackClick!();
+    });
+  }
+
+  private renderSuggestedBanner(): void {
+    this.wrapperEl.createEl("div", {
+      cls: "gev-suggested-banner",
+      text: "リンクなし — 最近更新したノードを表示しています",
+    });
+  }
+
+  private renderHintBar(): void {
+    const hint = this.wrapperEl.createEl("div", {
+      cls: "gev-hint-bar",
+      text: "周囲カードをクリック: 移動　余白をクリック: グラフ表示　✕ で閉じる",
+    });
+    hint.addEventListener("click", (e) => {
+      e.stopPropagation();
+      localStorage.setItem(HINT_DISMISSED_KEY, "1");
+      hint.remove();
+    });
+  }
+
+  private clearAll(): void {
     for (const card of this.activeCards) {
       this.parentComponent.removeChild(card);
       card.unload();
@@ -181,8 +219,15 @@ export class PreviewModeRenderer extends Component {
     }
     this.activeCards = [];
 
-    const moreBtn = this.wrapperEl.querySelector(".gev-more-btn");
-    if (moreBtn) moreBtn.remove();
+    // remove all non-SVG UI elements added by render()
+    for (const cls of [
+      ".gev-more-btn",
+      ".gev-back-btn",
+      ".gev-hint-bar",
+      ".gev-suggested-banner",
+    ]) {
+      this.wrapperEl.querySelector(cls)?.remove();
+    }
   }
 
   show(): void {
@@ -194,7 +239,7 @@ export class PreviewModeRenderer extends Component {
   }
 
   destroy(): void {
-    this.clearCards();
+    this.clearAll();
     this.wrapperEl.remove();
   }
 }

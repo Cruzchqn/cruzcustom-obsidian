@@ -71,7 +71,7 @@ function getRecentFiles(app: App, exclude: TFile, count: number): TFile[] {
     .slice(0, count);
 }
 
-export function getTodayFile(app: App): TFile {
+export function getTodayFile(app: App): TFile | null {
   const today = window.moment().format("YYYY-MM-DD");
   const byPath = app.vault.getAbstractFileByPath(`${today}.md`);
   if (byPath instanceof TFile) return byPath;
@@ -84,7 +84,7 @@ export function getTodayFile(app: App): TFile {
   const files = app.vault
     .getMarkdownFiles()
     .sort((a, b) => b.stat.mtime - a.stat.mtime);
-  return files[0];
+  return files[0] ?? null;
 }
 
 export function getAllRelatedForSearch(

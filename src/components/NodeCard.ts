@@ -28,7 +28,24 @@ export class NodeCard extends Component {
 
   async build(): Promise<void> {
     const titleEl = this.el.createEl("div", { cls: "gev-node-card__title" });
-    titleEl.setText(this.file.basename);
+
+    const nameSpan = titleEl.createEl("span", {
+      cls: "gev-node-card__title-text",
+      text: this.file.basename,
+    });
+    nameSpan.title = this.file.basename;
+
+    if (this.isCenter) {
+      const openBtn = titleEl.createEl("button", {
+        cls: "gev-node-card__open-btn",
+        title: "エディタで開く",
+        text: "↗",
+      });
+      openBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.app.workspace.getLeaf("tab").openFile(this.file);
+      });
+    }
 
     const contentEl = this.el.createEl("div", {
       cls: "gev-node-card__content",

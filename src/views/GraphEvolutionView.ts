@@ -13,6 +13,17 @@ export class GraphEvolutionView extends ItemView {
   private graphRenderer!: GraphModeRenderer;
   private searchPanel!: SearchPanelView;
 
+  // U3: navigation history
+  private history: TFile[] = [];
+
+  // B6: render lock
+  private isRendering = false;
+  private pendingFile: TFile | null = null;
+
+  // U4: resize observer
+  private resizeObserver: ResizeObserver | null = null;
+  private resizeTimer: number | null = null;
+
   constructor(leaf: WorkspaceLeaf, private readonly obsidianApp: App) {
     super(leaf);
   }
@@ -39,7 +50,11 @@ export class GraphEvolutionView extends ItemView {
       this,
       (file) => this.navigateTo(file),
       () => this.switchMode("graph"),
-      (file) => this.navigateTo(file)
+      (file) => this.navigateTo(file),
+      // B1: onMoreClick → opens search panel
+      () => this.switchMode("search"),
+      // U3: back button callback (null = no history yet)
+      null
     );
 
     this.graphRenderer = new GraphModeRenderer(
@@ -54,15 +69,50 @@ export class GraphEvolutionView extends ItemView {
       () => this.switchMode("preview")
     );
 
+    // B5: handle empty vault
     const initialFile = getTodayFile(this.obsidianApp);
+    if (!initialFile) {
+      this.showEmptyState(container);
+      return;
+    }
+
     this.setState(initialFile, "preview");
-    await this.render();
+
+    // B3: defer first render until DOM layout is complete
+    window.requestAnimationFrame(() => {
+      this.render();
+    });
+
+    // U4: resize observer with 100ms debounce
+    this.resizeObserver = new ResizeObserver(() => {
+      if (this.resizeTimer !== null) window.clearTimeout(this.resizeTimer);
+      this.resizeTimer = window.setTimeout(() => {
+        this.resizeTimer = null;
+        if (this.state.mode === "preview" || this.state.mode === "graph") {
+          this.render();
+        }
+      }, 100);
+    });
+    this.resizeObserver.observe(container);
   }
 
   async onClose(): Promise<void> {
-    this.previewRenderer.destroy();
-    this.graphRenderer.destroy();
-    this.searchPanel.destroy();
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+      this.resizeObserver = null;
+    }
+    if (this.resizeTimer !== null) {
+      window.clearTimeout(this.resizeTimer);
+    }
+    this.previewRenderer?.destroy();
+    this.graphRenderer?.destroy();
+    this.searchPanel?.destroy();
+  }
+
+  private showEmptyState(container: HTMLElement): void {
+    const el = container.createEl("div", { cls: "gev-empty-state" });
+    el.createEl("p", { text: "Markdown ファイルが見つかりません。" });
+    el.createEl("p", { text: "まずノートを作成してください。" });
   }
 
   private setState(centerFile: TFile, mode: ViewMode): void {
@@ -70,12 +120,61 @@ export class GraphEvolutionView extends ItemView {
       this.obsidianApp,
       centerFile
     );
-    this.state = { mode, centerFile, surroundingFiles: surrounding, overflowFiles: overflow, isSuggested };
+    this.state = {
+      mode,
+      centerFile,
+      surroundingFiles: surrounding,
+      overflowFiles: overflow,
+      isSuggested,
+    };
   }
 
-  private navigateTo(file: TFile): void {
+  // U3: rebuild renderer with correct back callback
+  private rebuildPreviewRenderer(container: HTMLElement): void {
+    this.previewRenderer.destroy();
+    this.previewRenderer = new PreviewModeRenderer(
+      this.obsidianApp,
+      container,
+      this,
+      (file) => this.navigateTo(file),
+      () => this.switchMode("graph"),
+      (file) => this.navigateTo(file),
+      () => this.switchMode("search"),
+      this.history.length > 0 ? () => this.navigateBack() : null
+    );
+  }
+
+  // B6: async navigateTo with render lock
+  private async navigateTo(file: TFile): Promise<void> {
+    if (this.isRendering) {
+      // Queue the latest navigation request, drop intermediate ones
+      this.pendingFile = file;
+      return;
+    }
+
+    if (this.state) {
+      this.history.push(this.state.centerFile);
+    }
+
     this.setState(file, "preview");
-    this.render();
+    this.rebuildPreviewRenderer(this.contentEl);
+    await this.render();
+
+    // Process any pending navigation that arrived while rendering
+    if (this.pendingFile) {
+      const next = this.pendingFile;
+      this.pendingFile = null;
+      await this.navigateTo(next);
+    }
+  }
+
+  // U3: go back in history
+  private async navigateBack(): Promise<void> {
+    const prev = this.history.pop();
+    if (!prev) return;
+    this.setState(prev, "preview");
+    this.rebuildPreviewRenderer(this.contentEl);
+    await this.render();
   }
 
   private switchMode(mode: ViewMode): void {
@@ -96,18 +195,23 @@ export class GraphEvolutionView extends ItemView {
   }
 
   private async render(): Promise<void> {
-    const { mode } = this.state;
-
-    if (mode === "preview") {
-      this.graphRenderer.hide();
-      this.searchPanel.hide();
-      this.previewRenderer.show();
-      await this.previewRenderer.render(this.state);
-    } else if (mode === "graph") {
-      this.previewRenderer.hide();
-      this.searchPanel.hide();
-      this.graphRenderer.show();
-      this.graphRenderer.render(this.state);
+    if (this.isRendering) return;
+    this.isRendering = true;
+    try {
+      const { mode } = this.state;
+      if (mode === "preview") {
+        this.graphRenderer.hide();
+        this.searchPanel.hide();
+        this.previewRenderer.show();
+        await this.previewRenderer.render(this.state);
+      } else if (mode === "graph") {
+        this.previewRenderer.hide();
+        this.searchPanel.hide();
+        this.graphRenderer.show();
+        this.graphRenderer.render(this.state);
+      }
+    } finally {
+      this.isRendering = false;
     }
   }
 }
