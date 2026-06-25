@@ -17,16 +17,15 @@ export class PreviewModeRenderer extends Component {
   private panY = 0;
   private scale = 1;
 
-  // pan drag state
+  // pan drag
   private panning = false;
   private panStartX = 0;
   private panStartY = 0;
   private panOriginX = 0;
   private panOriginY = 0;
 
-  // bound handlers for cleanup
-  private _boundMouseMove: (e: MouseEvent) => void;
-  private _boundMouseUp: (e: MouseEvent) => void;
+  private _boundPanMove: (e: MouseEvent) => void;
+  private _boundPanUp: (e: MouseEvent) => void;
 
   constructor(
     private readonly app: App,
@@ -39,23 +38,19 @@ export class PreviewModeRenderer extends Component {
     private readonly onBackClick: (() => void) | null
   ) {
     super();
-
     this.wrapperEl = containerEl.createEl("div", { cls: "gev-preview-wrapper" });
-
-    // canvas layer — all cards and lines live here, transforms applied here
     this.canvasEl = this.wrapperEl.createEl("div", { cls: "gev-canvas" });
 
     this.svgEl = document.createElementNS("http://www.w3.org/2000/svg", "svg") as SVGSVGElement;
     this.svgEl.classList.add("gev-svg-overlay");
     this.canvasEl.appendChild(this.svgEl);
 
-    this._boundMouseMove = this._onPanMove.bind(this);
-    this._boundMouseUp = this._onPanUp.bind(this);
-
+    this._boundPanMove = this._onPanMove.bind(this);
+    this._boundPanUp   = this._onPanUp.bind(this);
     this._setupPanZoom();
   }
 
-  // ── pan/zoom ──────────────────────────────────────────────
+  // ── pan / zoom ────────────────────────────────────────
 
   private _applyTransform(): void {
     this.canvasEl.style.transform =
@@ -63,7 +58,6 @@ export class PreviewModeRenderer extends Component {
   }
 
   private _setupPanZoom(): void {
-    // scroll to zoom toward cursor
     this.wrapperEl.addEventListener("wheel", (e) => {
       e.preventDefault();
       const factor = e.deltaY < 0 ? 1.1 : 0.9;
@@ -71,35 +65,29 @@ export class PreviewModeRenderer extends Component {
       const rect = this.wrapperEl.getBoundingClientRect();
       const cx = e.clientX - rect.left;
       const cy = e.clientY - rect.top;
-      const cursorCX = (cx - this.panX) / this.scale;
-      const cursorCY = (cy - this.panY) / this.scale;
-      this.panX = cx - cursorCX * newScale;
-      this.panY = cy - cursorCY * newScale;
+      const ccx = (cx - this.panX) / this.scale;
+      const ccy = (cy - this.panY) / this.scale;
+      this.panX = cx - ccx * newScale;
+      this.panY = cy - ccy * newScale;
       this.scale = newScale;
       this._applyTransform();
     }, { passive: false });
 
-    // background drag to pan
     this.wrapperEl.addEventListener("mousedown", (e) => {
       if (e.button !== 0) return;
-      const target = e.target as Element;
-      if (this._isInteractable(target)) return;
-
+      if (this._isInteractable(e.target as Element)) return;
       this.panning = true;
       this.panStartX = e.clientX;
       this.panStartY = e.clientY;
       this.panOriginX = this.panX;
       this.panOriginY = this.panY;
       this.wrapperEl.style.cursor = "grabbing";
-
-      document.addEventListener("mousemove", this._boundMouseMove);
-      document.addEventListener("mouseup", this._boundMouseUp);
+      document.addEventListener("mousemove", this._boundPanMove);
+      document.addEventListener("mouseup", this._boundPanUp);
     });
 
-    // click on background → switch to graph mode (only if not panning)
     this.wrapperEl.addEventListener("click", (e) => {
-      const target = e.target as Element;
-      if (!this._isInteractable(target)) {
+      if (!this._isInteractable(e.target as Element)) {
         this.onBackgroundClick();
       }
     });
@@ -117,35 +105,31 @@ export class PreviewModeRenderer extends Component {
     const moved = Math.hypot(e.clientX - this.panStartX, e.clientY - this.panStartY);
     this.panning = false;
     this.wrapperEl.style.cursor = "";
-    document.removeEventListener("mousemove", this._boundMouseMove);
-    document.removeEventListener("mouseup", this._boundMouseUp);
-
-    // suppress background click if it was a real pan
-    if (moved > 5) {
-      e.stopImmediatePropagation();
-    }
+    document.removeEventListener("mousemove", this._boundPanMove);
+    document.removeEventListener("mouseup", this._boundPanUp);
+    if (moved > 5) e.stopImmediatePropagation();
   }
 
-  private _isInteractable(target: Element): boolean {
+  private _isInteractable(t: Element): boolean {
     return !!(
-      target.closest(".gev-node-card") ||
-      target.closest(".gev-overflow-dot") ||
-      target.closest(".gev-more-btn") ||
-      target.closest(".gev-back-btn") ||
-      target.closest(".gev-hint-bar") ||
-      target.closest(".gev-suggested-banner")
+      t.closest(".gev-node-card") ||
+      t.closest(".gev-dot-pill") ||
+      t.closest(".gev-more-btn") ||
+      t.closest(".gev-back-btn") ||
+      t.closest(".gev-hint-bar") ||
+      t.closest(".gev-suggested-banner")
     );
   }
 
-  // ── render ────────────────────────────────────────────────
+  // ── render ────────────────────────────────────────────
 
   async render(state: GraphState): Promise<void> {
     this.clearAll();
 
-    const w = this.wrapperEl.clientWidth || 800;
+    const w = this.wrapperEl.clientWidth  || 800;
     const h = this.wrapperEl.clientHeight || 600;
-    const centerPos = { x: w / 2, y: h / 2 };
-    const radius = Math.min(w, h) * 0.34;
+    const centerPos    = { x: w / 2, y: h / 2 };
+    const radius       = Math.min(w, h) * 0.34;
 
     this.svgEl.setAttribute("viewBox", `0 0 ${w} ${h}`);
 
@@ -160,74 +144,53 @@ export class PreviewModeRenderer extends Component {
     this.centerCard = centerCard;
 
     // surrounding cards
-    const surroundCards = state.surroundingFiles.map((file) =>
-      this._makeCard(file, false, state.isSuggested)
+    const surroundCards = state.surroundingFiles.map((f) =>
+      this._makeCard(f, false, state.isSuggested)
     );
 
     await Promise.all([centerCard, ...surroundCards].map((c) => c.build()));
 
+    // position center card — line anchor = card center
     centerCard.setPosition(centerPos.x, centerPos.y);
     this.canvasEl.appendChild(centerCard.el);
 
     for (let i = 0; i < surroundCards.length; i++) {
       const card = surroundCards[i];
-      card.setPosition(surroundPositions[i].x, surroundPositions[i].y);
+      const pos  = surroundPositions[i];
+      card.setPosition(pos.x, pos.y);
       this.canvasEl.appendChild(card.el);
 
       if (!state.isSuggested) {
-        const line = this._drawLine(centerPos, surroundPositions[i]);
+        // line from center to surrounding — both use visual-center coords
+        const line = this._drawLine(centerPos, pos);
         this.lineMap.set(card, line);
       }
     }
 
+    // overflow: render as pill tray in bottom-right of canvas
     if (state.overflowFiles.length > 0) {
-      this._renderOverflowDots(state.overflowFiles, centerPos, radius, w, h);
+      this._renderDotTray(state.overflowFiles, w, h);
     }
 
-    if (state.overflowFiles.length >= 12) {
-      this._renderMoreButton(state);
-    }
-
-    if (this.onBackClick) {
-      this._renderBackButton();
-    }
-
-    if (state.isSuggested) {
-      this._renderSuggestedBanner();
-    }
-
-    if (!localStorage.getItem(HINT_DISMISSED_KEY)) {
-      this._renderHintBar();
-    }
+    if (this.onBackClick) this._renderBackButton();
+    if (state.isSuggested) this._renderSuggestedBanner();
+    if (!localStorage.getItem(HINT_DISMISSED_KEY)) this._renderHintBar();
   }
 
   private _makeCard(file: TFile, isCenter: boolean, isSuggested: boolean): NodeCard {
     const card = new NodeCard(this.app, { file, isCenter, isSuggested, onNavigate: this.onNavigate });
     card.getScale = () => this.scale;
-    card.onDrag = () => this._updateLines();
+    card.onDrag   = () => this._updateLines();
     this.parentComponent.addChild(card);
     this.activeCards.push(card);
     return card;
   }
 
-  private _updateLines(): void {
-    if (!this.centerCard) return;
-    const cx = this.centerCard.x;
-    const cy = this.centerCard.y;
-    for (const card of this.activeCards) {
-      if (card === this.centerCard) continue;
-      const line = this.lineMap.get(card);
-      if (!line) continue;
-      line.setAttribute("x1", String(cx));
-      line.setAttribute("y1", String(cy));
-      line.setAttribute("x2", String(card.x));
-      line.setAttribute("y2", String(card.y));
-    }
-  }
+  // ── lines ─────────────────────────────────────────────
 
   private _drawLine(
     from: { x: number; y: number },
-    to: { x: number; y: number }
+    to:   { x: number; y: number }
   ): SVGLineElement {
     const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
     line.setAttribute("x1", String(from.x));
@@ -239,68 +202,108 @@ export class PreviewModeRenderer extends Component {
     return line;
   }
 
-  // ── overflow / buttons ────────────────────────────────────
-
-  private _renderOverflowDots(
-    files: TFile[],
-    center: { x: number; y: number },
-    innerRadius: number,
-    w: number,
-    h: number
-  ): void {
-    const outerRadius = Math.min(w, h) * 0.48;
-    const positions = computeCircularPositions(files.length, center, outerRadius);
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const pos = positions[i];
-
-      const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
-      g.setAttribute("class", "gev-overflow-dot");
-      g.style.cursor = "pointer";
-      g.style.pointerEvents = "all";
-
-      const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-      circle.setAttribute("cx", String(pos.x));
-      circle.setAttribute("cy", String(pos.y));
-      circle.setAttribute("r", "5");
-      circle.setAttribute("class", "gev-overflow-dot__circle");
-
-      const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
-      title.textContent = file.basename;
-
-      g.appendChild(circle);
-      g.appendChild(title);
-
-      g.addEventListener("click", (e) => {
-        e.stopPropagation();
-        this.onOverflowDotClick(file);
-      });
-
-      this.svgEl.appendChild(g);
+  private _updateLines(): void {
+    if (!this.centerCard) return;
+    const { x: cx, y: cy } = this.centerCard.getCenter();
+    for (const card of this.activeCards) {
+      if (card === this.centerCard) continue;
+      const line = this.lineMap.get(card);
+      if (!line) continue;
+      const { x, y } = card.getCenter();
+      line.setAttribute("x1", String(cx));
+      line.setAttribute("y1", String(cy));
+      line.setAttribute("x2", String(x));
+      line.setAttribute("y2", String(y));
     }
   }
 
-  private _renderMoreButton(state: GraphState): void {
-    const btn = this.wrapperEl.createEl("button", {
-      cls: "gev-more-btn",
-      text: `もっと見る (+${state.overflowFiles.length} 件)`,
-    });
-    btn.addEventListener("click", (e) => {
+  // ── dot tray (overflow) ───────────────────────────────
+
+  /**
+   * Overflow files rendered as draggable pill chips, initially clustered
+   * bottom-right so they stay out of the main card area. Each pill shows
+   * the filename and can be individually dragged anywhere on the canvas.
+   */
+  private _renderDotTray(files: TFile[], w: number, h: number): void {
+    const PILL_W    = 150;
+    const PILL_H    = 26;
+    const GAP       = 6;
+    const COLS      = 3;
+    const ORIGIN_X  = w - (PILL_W + GAP) * COLS + GAP;
+    const ORIGIN_Y  = h - (Math.ceil(files.length / COLS)) * (PILL_H + GAP) - 20;
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const col  = i % COLS;
+      const row  = Math.floor(i / COLS);
+      const px   = ORIGIN_X + col * (PILL_W + GAP);
+      const py   = ORIGIN_Y + row * (PILL_H + GAP);
+
+      const pill = this.canvasEl.createEl("div", { cls: "gev-dot-pill" });
+      pill.title = file.basename;
+      pill.style.left   = `${px}px`;
+      pill.style.top    = `${py}px`;
+      pill.style.width  = `${PILL_W}px`;
+
+      // dot indicator
+      pill.createEl("span", { cls: "gev-dot-pill__dot" });
+
+      // filename label (truncated via CSS)
+      pill.createEl("span", {
+        cls:  "gev-dot-pill__name",
+        text: file.basename,
+      });
+
+      // click → navigate
+      pill.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.onNavigate(file);
+      });
+
+      // drag (independent pill drag)
+      this._makePillDraggable(pill);
+    }
+  }
+
+  private _makePillDraggable(pill: HTMLElement): void {
+    let startX = 0, startY = 0, origLeft = 0, origTop = 0, moved = false;
+
+    const onMove = (e: MouseEvent) => {
+      const scale = this.scale;
+      const dx = (e.clientX - startX) / scale;
+      const dy = (e.clientY - startY) / scale;
+      if (!moved && Math.hypot(dx, dy) < 4) return;
+      moved = true;
+      pill.style.left = `${origLeft + dx}px`;
+      pill.style.top  = `${origTop  + dy}px`;
+    };
+
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+
+    pill.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
       e.stopPropagation();
-      this.onMoreClick();
+      e.preventDefault();
+      moved = false;
+      startX   = e.clientX;
+      startY   = e.clientY;
+      origLeft = parseFloat(pill.style.left) || 0;
+      origTop  = parseFloat(pill.style.top)  || 0;
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
     });
   }
 
+  // ── buttons / banners ─────────────────────────────────
+
   private _renderBackButton(): void {
     const btn = this.wrapperEl.createEl("button", {
-      cls: "gev-back-btn",
-      text: "← 戻る",
+      cls: "gev-back-btn", text: "← 戻る",
     });
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      this.onBackClick!();
-    });
+    btn.addEventListener("click", (e) => { e.stopPropagation(); this.onBackClick!(); });
   }
 
   private _renderSuggestedBanner(): void {
@@ -313,7 +316,7 @@ export class PreviewModeRenderer extends Component {
   private _renderHintBar(): void {
     const hint = this.wrapperEl.createEl("div", {
       cls: "gev-hint-bar",
-      text: "タイトルドラッグ: 移動 | ダブルクリック: 中心に | − : 折り畳み | ホイール: ズーム | 余白ドラッグ: パン | 余白クリック: グラフ表示",
+      text: "タイトルドラッグ: 移動 | ダブルクリック: 中心に | − : 折り畳み | ✎: 編集 | ホイール: ズーム | 余白ドラッグ: パン | 余白クリック: グラフ表示",
     });
     hint.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -322,7 +325,7 @@ export class PreviewModeRenderer extends Component {
     });
   }
 
-  // ── lifecycle ─────────────────────────────────────────────
+  // ── lifecycle ─────────────────────────────────────────
 
   private clearAll(): void {
     for (const card of this.activeCards) {
@@ -331,33 +334,31 @@ export class PreviewModeRenderer extends Component {
       card.el.remove();
     }
     this.activeCards = [];
-    this.lineMap = new WeakMap();
-    this.centerCard = null;
+    this.lineMap     = new WeakMap();
+    this.centerCard  = null;
 
     while (this.svgEl.firstChild) this.svgEl.removeChild(this.svgEl.firstChild);
 
-    for (const cls of [
-      ".gev-more-btn",
-      ".gev-back-btn",
-      ".gev-hint-bar",
-      ".gev-suggested-banner",
-    ]) {
-      this.wrapperEl.querySelector(cls)?.remove();
-    }
+    // remove all canvas-level pills
+    this.canvasEl.querySelectorAll(".gev-dot-pill").forEach((el) => el.remove());
+
+    // remove wrapper-level overlays
+    [".gev-more-btn", ".gev-back-btn", ".gev-hint-bar", ".gev-suggested-banner"]
+      .forEach((sel) => this.wrapperEl.querySelector(sel)?.remove());
   }
 
   show(): void { this.wrapperEl.style.display = ""; }
   hide(): void { this.wrapperEl.style.display = "none"; }
 
   destroy(): void {
-    document.removeEventListener("mousemove", this._boundMouseMove);
-    document.removeEventListener("mouseup", this._boundMouseUp);
+    document.removeEventListener("mousemove", this._boundPanMove);
+    document.removeEventListener("mouseup",   this._boundPanUp);
     this.clearAll();
     this.wrapperEl.remove();
   }
 }
 
-// ── helpers ───────────────────────────────────────────────
+// ── helpers ───────────────────────────────────────────
 
 function computeCircularPositions(
   count: number,

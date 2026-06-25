@@ -9,7 +9,7 @@ export class NodeCard extends Component {
   private readonly isSuggested: boolean;
   private readonly onNavigate: (file: TFile) => void;
 
-  // position within canvas coordinate space
+  // position = visual center of this card in canvas coords
   public x = 0;
   public y = 0;
 
@@ -17,10 +17,10 @@ export class NodeCard extends Component {
   private collapsed = false;
   private collapseBtn: HTMLButtonElement | null = null;
 
-  // drag
+  // drag suppression
   private dragMoving = false;
 
-  // injected by renderer after build
+  // injected by renderer
   public getScale: (() => number) | null = null;
   public onDrag: ((x: number, y: number) => void) | null = null;
 
@@ -41,6 +41,7 @@ export class NodeCard extends Component {
     this.el.className = classes.join(" ");
   }
 
+  // visual center in canvas coordinates
   setPosition(x: number, y: number): void {
     this.x = x;
     this.y = y;
@@ -48,16 +49,21 @@ export class NodeCard extends Component {
     this.el.style.top = `${y}px`;
   }
 
+  // center of the card element (accounts for actual rendered size)
+  getCenter(): { x: number; y: number } {
+    return { x: this.x, y: this.y };
+  }
+
   async build(): Promise<void> {
+    // ── Title bar ─────────────────────────────────────────
     const titleEl = this.el.createEl("div", { cls: "gev-node-card__title" });
 
-    const nameSpan = titleEl.createEl("span", {
+    titleEl.createEl("span", {
       cls: "gev-node-card__title-text",
       text: this.file.basename,
-    });
-    nameSpan.title = this.file.basename;
+    }).title = this.file.basename;
 
-    // ↗ open in editor (all cards)
+    // ↗ open in editor
     const openBtn = titleEl.createEl("button", {
       cls: "gev-node-card__open-btn",
       title: "エディタで開く",
@@ -68,7 +74,12 @@ export class NodeCard extends Component {
       this.app.workspace.getLeaf("tab").openFile(this.file);
     });
 
-    // − collapse button (surrounding cards only)
+    // ✎ inline edit (center card only)
+    if (this.isCenter) {
+      this._buildEditToggle(titleEl);
+    }
+
+    // − collapse (surrounding cards)
     if (!this.isCenter) {
       this.collapseBtn = titleEl.createEl("button", {
         cls: "gev-node-card__collapse-btn",
@@ -81,6 +92,7 @@ export class NodeCard extends Component {
       });
     }
 
+    // ── Content ───────────────────────────────────────────
     const contentEl = this.el.createEl("div", { cls: "gev-node-card__content" });
 
     try {
@@ -90,16 +102,7 @@ export class NodeCard extends Component {
       contentEl.setText("(読み込みエラー)");
     }
 
-    // center card: click content → open editor
-    if (this.isCenter) {
-      contentEl.style.cursor = "text";
-      contentEl.addEventListener("click", (e) => {
-        e.stopPropagation();
-        this.app.workspace.getLeaf("tab").openFile(this.file);
-      });
-    }
-
-    // surrounding card: single click → navigate (unless drag occurred)
+    // surrounding card: click → navigate (unless drag)
     if (!this.isCenter) {
       this.el.addEventListener("click", (e) => {
         if (this.dragMoving) return;
@@ -108,18 +111,80 @@ export class NodeCard extends Component {
       });
     }
 
-    // title: drag to move + dblclick to center
-    this._setupTitleInteraction(titleEl);
+    // ── Interactions ──────────────────────────────────────
+    this._setupTitleDrag(titleEl);
+    this._setupResize();
   }
 
-  private _setupTitleInteraction(titleEl: HTMLElement): void {
+  // ── Inline edit ───────────────────────────────────────
+
+  private _buildEditToggle(titleEl: HTMLElement): void {
+    let editing = false;
+    let textarea: HTMLTextAreaElement | null = null;
+    const contentEl = () => this.el.querySelector<HTMLElement>(".gev-node-card__content")!;
+
+    const editBtn = titleEl.createEl("button", {
+      cls: "gev-node-card__edit-btn",
+      title: "編集 (Ctrl+S で保存 / Esc で閉じる)",
+      text: "✎",
+    });
+
+    const save = async () => {
+      if (textarea) await this.app.vault.modify(this.file, textarea.value);
+    };
+
+    const exitEdit = async () => {
+      await save();
+      textarea?.remove();
+      textarea = null;
+      editing = false;
+      editBtn.textContent = "✎";
+      editBtn.title = "編集 (Ctrl+S で保存 / Esc で閉じる)";
+      const c = contentEl();
+      if (c) c.style.display = "";
+    };
+
+    const enterEdit = async () => {
+      editing = true;
+      editBtn.textContent = "✓";
+      editBtn.title = "保存して閉じる";
+      const c = contentEl();
+      if (c) c.style.display = "none";
+
+      const raw = await this.app.vault.read(this.file);
+      textarea = this.el.createEl("textarea", { cls: "gev-node-card__textarea" });
+      textarea.value = raw;
+      textarea.focus();
+
+      textarea.addEventListener("keydown", async (e) => {
+        if (e.key === "s" && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          await save();
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          await exitEdit();
+        }
+      });
+    };
+
+    editBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (editing) await exitEdit();
+      else await enterEdit();
+    });
+  }
+
+  // ── Title drag ────────────────────────────────────────
+
+  private _setupTitleDrag(titleEl: HTMLElement): void {
     let startClientX = 0;
     let startClientY = 0;
     let startCardX = 0;
     let startCardY = 0;
     let moved = false;
 
-    const onMouseMove = (e: MouseEvent) => {
+    const onMove = (e: MouseEvent) => {
       const dx = e.clientX - startClientX;
       const dy = e.clientY - startClientY;
       if (!moved && Math.hypot(dx, dy) < 4) return;
@@ -134,11 +199,10 @@ export class NodeCard extends Component {
       this.onDrag?.(this.x, this.y);
     };
 
-    const onMouseUp = () => {
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
       titleEl.style.cursor = "grab";
-      // reset dragMoving after click event fires
       setTimeout(() => { this.dragMoving = false; }, 0);
     };
 
@@ -155,28 +219,69 @@ export class NodeCard extends Component {
       startCardX = this.x;
       startCardY = this.y;
       titleEl.style.cursor = "grabbing";
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
     });
 
-    // dblclick title → make this file the center node
+    // dblclick title → center on this file
     titleEl.addEventListener("dblclick", (e) => {
       e.stopPropagation();
-      if (!this.isCenter) {
-        this.onNavigate(this.file);
-      }
+      if (!this.isCenter) this.onNavigate(this.file);
     });
   }
 
+  // ── Edge resize ───────────────────────────────────────
+
+  private _setupResize(): void {
+    const dirs = [
+      { cls: "gev-resize-e",  cursor: "ew-resize",  dx: true,  dy: false },
+      { cls: "gev-resize-s",  cursor: "ns-resize",  dx: false, dy: true  },
+      { cls: "gev-resize-se", cursor: "se-resize",  dx: true,  dy: true  },
+    ];
+
+    for (const { cls, cursor, dx, dy } of dirs) {
+      const handle = this.el.createEl("div", { cls: `gev-resize-handle ${cls}` });
+      handle.style.cursor = cursor;
+
+      handle.addEventListener("mousedown", (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const startX = e.clientX;
+        const startY = e.clientY;
+        const startW = this.el.offsetWidth;
+        const startH = this.el.offsetHeight;
+
+        const onMove = (ev: MouseEvent) => {
+          const scale = this.getScale?.() ?? 1;
+          if (dx) {
+            const w = Math.max(120, startW + (ev.clientX - startX) / scale);
+            this.el.style.width = `${w}px`;
+          }
+          if (dy) {
+            const h = Math.max(80, startH + (ev.clientY - startY) / scale);
+            this.el.style.maxHeight = "none";
+            this.el.style.height = `${h}px`;
+          }
+          this.onDrag?.(this.x, this.y);
+        };
+
+        const onUp = () => {
+          document.removeEventListener("mousemove", onMove);
+          document.removeEventListener("mouseup", onUp);
+        };
+
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", onUp);
+      });
+    }
+  }
+
+  // ── Collapse ──────────────────────────────────────────
+
   toggleCollapse(): void {
     this.collapsed = !this.collapsed;
-    if (this.collapsed) {
-      this.el.classList.add("gev-node-card--collapsed");
-      if (this.collapseBtn) this.collapseBtn.textContent = "+";
-    } else {
-      this.el.classList.remove("gev-node-card--collapsed");
-      if (this.collapseBtn) this.collapseBtn.textContent = "−";
-    }
+    this.el.classList.toggle("gev-node-card--collapsed", this.collapsed);
+    if (this.collapseBtn) this.collapseBtn.textContent = this.collapsed ? "+" : "−";
     this.onDrag?.(this.x, this.y);
   }
 }
