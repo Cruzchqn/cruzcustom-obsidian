@@ -17,8 +17,9 @@ export class NodeCard extends Component {
   private collapsed = false;
   private collapseBtn: HTMLButtonElement | null = null;
 
-  // drag suppression
+  // interaction suppression
   private dragMoving = false;
+  private _resizing  = false;
 
   // injected by renderer
   public getScale: (() => number) | null = null;
@@ -102,10 +103,10 @@ export class NodeCard extends Component {
       contentEl.setText("(読み込みエラー)");
     }
 
-    // surrounding card: click → navigate (unless drag)
+    // surrounding card: click → navigate (unless drag or resize)
     if (!this.isCenter) {
       this.el.addEventListener("click", (e) => {
-        if (this.dragMoving) return;
+        if (this.dragMoving || this._resizing) return;
         e.stopPropagation();
         this.onNavigate(this.file);
       });
@@ -246,6 +247,7 @@ export class NodeCard extends Component {
       handle.addEventListener("mousedown", (e) => {
         e.stopPropagation();
         e.preventDefault();
+        this._resizing = true;
         const startX = e.clientX;
         const startY = e.clientY;
         const startW = this.el.offsetWidth;
@@ -268,6 +270,7 @@ export class NodeCard extends Component {
         const onUp = () => {
           document.removeEventListener("mousemove", onMove);
           document.removeEventListener("mouseup", onUp);
+          setTimeout(() => { this._resizing = false; }, 0);
         };
 
         document.addEventListener("mousemove", onMove);
