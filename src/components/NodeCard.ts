@@ -1,4 +1,4 @@
-import { App, Component, MarkdownRenderer, TFile } from "obsidian";
+import { App, Component, MarkdownRenderer, Menu, TFile } from "obsidian";
 import { NodeCardOptions } from "../types";
 
 export class NodeCard extends Component {
@@ -115,6 +115,7 @@ export class NodeCard extends Component {
     // ── Interactions ──────────────────────────────────────
     this._setupTitleDrag(titleEl);
     this._setupResize();
+    this._setupContextMenu();
   }
 
   // ── Inline edit ───────────────────────────────────────
@@ -277,6 +278,60 @@ export class NodeCard extends Component {
         document.addEventListener("mouseup", onUp);
       });
     }
+  }
+
+  // ── Context menu ──────────────────────────────────────
+
+  private _setupContextMenu(): void {
+    this.el.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const menu = new Menu();
+
+      // 1. センターに設定
+      menu.addItem((item) =>
+        item
+          .setTitle("このノートをセンターに設定")
+          .setIcon("crosshair")
+          .onClick(() => this.onNavigate(this.file))
+      );
+
+      // 2. 新しいタブで開く
+      menu.addItem((item) =>
+        item
+          .setTitle("新しいタブで開く")
+          .setIcon("arrow-up-right")
+          .onClick(() => this.app.workspace.getLeaf("tab").openFile(this.file))
+      );
+
+      // 3. [[リンク]] をコピー
+      menu.addItem((item) =>
+        item
+          .setTitle("[[リンク]] をコピー")
+          .setIcon("link")
+          .onClick(() => {
+            navigator.clipboard.writeText(`[[${this.file.basename}]]`);
+          })
+      );
+
+      // 4. リンクされた新規ノートを作成
+      menu.addItem((item) =>
+        item
+          .setTitle("リンクされた新規ノートを作成")
+          .setIcon("file-plus")
+          .onClick(async () => {
+            const folder = this.file.parent?.path ?? "";
+            const newFile = await this.app.vault.create(
+              `${folder ? folder + "/" : ""}Untitled.md`,
+              `[[${this.file.basename}]]\n`
+            );
+            this.onNavigate(newFile);
+          })
+      );
+
+      menu.showAtMouseEvent(e);
+    });
   }
 
   // ── Collapse ──────────────────────────────────────────

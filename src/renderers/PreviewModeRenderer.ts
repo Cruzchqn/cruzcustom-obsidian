@@ -1,4 +1,4 @@
-import { App, Component, TFile } from "obsidian";
+import { App, Component, Menu, TFile } from "obsidian";
 import { GraphState } from "../types";
 import { NodeCard } from "../components/NodeCard";
 
@@ -90,6 +90,28 @@ export class PreviewModeRenderer extends Component {
       if (!this._isInteractable(e.target as Element)) {
         this.onBackgroundClick();
       }
+    });
+
+    this.wrapperEl.addEventListener("contextmenu", (e) => {
+      if (this._isInteractable(e.target as Element)) return;
+      e.preventDefault();
+
+      // canvas coordinate at right-click position
+      const rect = this.wrapperEl.getBoundingClientRect();
+      const cx = (e.clientX - rect.left - this.panX) / this.scale;
+      const cy = (e.clientY - rect.top  - this.panY) / this.scale;
+
+      const menu = new Menu();
+      menu.addItem((item) =>
+        item
+          .setTitle("この位置に新規ノートを作成")
+          .setIcon("file-plus")
+          .onClick(async () => {
+            const newFile = await this.app.vault.create("Untitled.md", "");
+            this.onNavigate(newFile);
+          })
+      );
+      menu.showAtMouseEvent(e);
     });
   }
 
