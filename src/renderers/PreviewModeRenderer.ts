@@ -59,6 +59,9 @@ export class PreviewModeRenderer extends Component {
 
   private _setupPanZoom(): void {
     this.wrapperEl.addEventListener("wheel", (e) => {
+      if ((e.target as Element).closest(
+        ".gev-node-card__content, .gev-node-card__textarea"
+      )) return;
       e.preventDefault();
       const factor = e.deltaY < 0 ? 1.1 : 0.9;
       const newScale = Math.min(3, Math.max(0.15, this.scale * factor));
