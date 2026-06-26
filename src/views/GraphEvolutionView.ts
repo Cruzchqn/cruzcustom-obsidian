@@ -24,7 +24,11 @@ export class GraphEvolutionView extends ItemView {
   private resizeObserver: ResizeObserver | null = null;
   private resizeTimer: number | null = null;
 
-  constructor(leaf: WorkspaceLeaf, private readonly obsidianApp: App) {
+  constructor(
+    leaf: WorkspaceLeaf,
+    private readonly obsidianApp: App,
+    private readonly getLastFilePath: () => string | null = () => null
+  ) {
     super(leaf);
   }
 
@@ -37,7 +41,7 @@ export class GraphEvolutionView extends ItemView {
   }
 
   getIcon(): string {
-    return "git-fork";
+    return "gev-graph";
   }
 
   async onOpen(): Promise<void> {
@@ -69,8 +73,16 @@ export class GraphEvolutionView extends ItemView {
       () => this.switchMode("preview")
     );
 
-    // B5: handle empty vault
-    const initialFile = getTodayFile(this.obsidianApp);
+    // Initial file: last opened → active editor → most-recently-modified
+    const lastPath = this.getLastFilePath();
+    const lastFile = lastPath
+      ? this.obsidianApp.vault.getAbstractFileByPath(lastPath)
+      : null;
+    const initialFile =
+      (lastFile instanceof TFile ? lastFile : null) ??
+      this.obsidianApp.workspace.getActiveFile() ??
+      getTodayFile(this.obsidianApp);
+
     if (!initialFile) {
       this.showEmptyState(container);
       return;
