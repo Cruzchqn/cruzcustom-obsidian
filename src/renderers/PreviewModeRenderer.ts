@@ -168,9 +168,9 @@ export class PreviewModeRenderer extends Component {
     const centerCard = this._makeCard(state.centerFile, true, false);
     this.centerCard = centerCard;
 
-    // surrounding cards
+    // surrounding cards (pass centerFile so right-click can link back)
     const surroundCards = state.surroundingFiles.map((f) =>
-      this._makeCard(f, false, state.isSuggested)
+      this._makeCard(f, false, state.isSuggested, state.centerFile)
     );
 
     await Promise.all([centerCard, ...surroundCards].map((c) => c.build()));
@@ -192,9 +192,9 @@ export class PreviewModeRenderer extends Component {
       }
     }
 
-    // overflow: render as pill tray in bottom-right of canvas
-    if (state.overflowFiles.length > 0) {
-      this._renderDotTray(state.overflowFiles, w, h);
+    // overflow pills (linked) + same-dir pills (unlinked, different style)
+    if (state.overflowFiles.length > 0 || state.sameDirFiles.length > 0) {
+      this._renderDotTray(state.overflowFiles, state.sameDirFiles, w, h);
     }
 
     if (this.onBackClick) this._renderBackButton();
@@ -202,8 +202,15 @@ export class PreviewModeRenderer extends Component {
     if (!localStorage.getItem(HINT_DISMISSED_KEY)) this._renderHintBar();
   }
 
-  private _makeCard(file: TFile, isCenter: boolean, isSuggested: boolean): NodeCard {
-    const card = new NodeCard(this.app, { file, isCenter, isSuggested, onNavigate: this.onNavigate });
+  private _makeCard(
+    file: TFile,
+    isCenter: boolean,
+    isSuggested: boolean,
+    centerFile: TFile | null = null
+  ): NodeCard {
+    const card = new NodeCard(this.app, {
+      file, isCenter, isSuggested, onNavigate: this.onNavigate, centerFile,
+    });
     card.getScale = () => this.scale;
     card.onDrag   = () => this._updateLines();
     this.parentComponent.addChild(card);
@@ -249,43 +256,46 @@ export class PreviewModeRenderer extends Component {
    * bottom-right so they stay out of the main card area. Each pill shows
    * the filename and can be individually dragged anywhere on the canvas.
    */
-  private _renderDotTray(files: TFile[], w: number, h: number): void {
-    const PILL_W    = 150;
-    const PILL_H    = 26;
-    const GAP       = 6;
-    const COLS      = 3;
-    const ORIGIN_X  = w - (PILL_W + GAP) * COLS + GAP;
-    const ORIGIN_Y  = h - (Math.ceil(files.length / COLS)) * (PILL_H + GAP) - 20;
+  private _renderDotTray(
+    linkedFiles: TFile[],
+    dirFiles: TFile[],
+    w: number,
+    h: number
+  ): void {
+    const PILL_W  = 150;
+    const PILL_H  = 26;
+    const GAP     = 6;
+    const COLS    = 3;
+    const allFiles = [
+      ...linkedFiles.map((f) => ({ file: f, dir: false })),
+      ...dirFiles.map((f)   => ({ file: f, dir: true  })),
+    ];
+    const rows    = Math.ceil(allFiles.length / COLS);
+    const ORIGIN_X = w - (PILL_W + GAP) * COLS + GAP;
+    const ORIGIN_Y = h - rows * (PILL_H + GAP) - 20;
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const col  = i % COLS;
-      const row  = Math.floor(i / COLS);
-      const px   = ORIGIN_X + col * (PILL_W + GAP);
-      const py   = ORIGIN_Y + row * (PILL_H + GAP);
+    for (let i = 0; i < allFiles.length; i++) {
+      const { file, dir } = allFiles[i];
+      const col = i % COLS;
+      const row = Math.floor(i / COLS);
+      const px  = ORIGIN_X + col * (PILL_W + GAP);
+      const py  = ORIGIN_Y + row * (PILL_H + GAP);
 
-      const pill = this.canvasEl.createEl("div", { cls: "gev-dot-pill" });
-      pill.title = file.basename;
+      const cls  = dir ? "gev-dot-pill gev-dot-pill--dir" : "gev-dot-pill";
+      const pill = this.canvasEl.createEl("div", { cls });
+      pill.title        = file.basename + (dir ? " (同フォルダ)" : "");
       pill.style.left   = `${px}px`;
       pill.style.top    = `${py}px`;
       pill.style.width  = `${PILL_W}px`;
 
-      // dot indicator
       pill.createEl("span", { cls: "gev-dot-pill__dot" });
+      pill.createEl("span", { cls: "gev-dot-pill__name", text: file.basename });
 
-      // filename label (truncated via CSS)
-      pill.createEl("span", {
-        cls:  "gev-dot-pill__name",
-        text: file.basename,
-      });
-
-      // click → navigate
       pill.addEventListener("click", (e) => {
         e.stopPropagation();
         this.onNavigate(file);
       });
 
-      // drag (independent pill drag)
       this._makePillDraggable(pill);
     }
   }

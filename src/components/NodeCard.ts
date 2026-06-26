@@ -8,6 +8,7 @@ export class NodeCard extends Component {
   private readonly isCenter: boolean;
   private readonly isSuggested: boolean;
   private readonly onNavigate: (file: TFile) => void;
+  private readonly centerFile: TFile | null;
 
   // position = visual center of this card in canvas coords
   public x = 0;
@@ -32,6 +33,7 @@ export class NodeCard extends Component {
     this.isCenter = options.isCenter;
     this.isSuggested = options.isSuggested;
     this.onNavigate = options.onNavigate;
+    this.centerFile = options.centerFile ?? null;
 
     const classes = ["gev-node-card"];
     if (this.isCenter) classes.push("gev-node-card--center");
@@ -329,6 +331,23 @@ export class NodeCard extends Component {
             this.onNavigate(newFile);
           })
       );
+
+      // 5. センターノードにリンクを追加（非センターカードのみ）
+      if (!this.isCenter && this.centerFile) {
+        const center = this.centerFile;
+        menu.addItem((item) =>
+          item
+            .setTitle("センターノードにリンクを追加")
+            .setIcon("link-2")
+            .onClick(async () => {
+              const link = `[[${this.file.basename}]]`;
+              const content = await this.app.vault.read(center);
+              if (!content.includes(link)) {
+                await this.app.vault.modify(center, content.trimEnd() + `\n${link}\n`);
+              }
+            })
+        );
+      }
 
       menu.showAtMouseEvent(e);
     });

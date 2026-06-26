@@ -6,6 +6,7 @@ const MAX_OVERFLOW_BEFORE_SEARCH = 20;
 export interface RelationResult {
   surrounding: TFile[];
   overflow: TFile[];
+  sameDirFiles: TFile[];
   isSuggested: boolean;
 }
 
@@ -48,9 +49,13 @@ export function getRelatedFiles(app: App, centerFile: TFile): RelationResult {
   const sorted = [...scored.values()].sort((a, b) => b.score - a.score);
 
   if (sorted.length === 0) {
+    const sameDirFiles = (centerFile.parent?.children ?? [])
+      .filter((f): f is TFile => f instanceof TFile && f.path !== centerFile.path)
+      .slice(0, 20);
     return {
       surrounding: getRecentFiles(app, centerFile, 5),
       overflow: [],
+      sameDirFiles,
       isSuggested: true,
     };
   }
@@ -60,7 +65,17 @@ export function getRelatedFiles(app: App, centerFile: TFile): RelationResult {
     .slice(MAX_SURROUNDING, MAX_OVERFLOW_BEFORE_SEARCH)
     .map((e) => e.file);
 
-  return { surrounding, overflow, isSuggested: false };
+  // Same-directory files not already visible
+  const shownPaths = new Set([
+    centerFile.path,
+    ...surrounding.map((f) => f.path),
+    ...overflow.map((f) => f.path),
+  ]);
+  const sameDirFiles = (centerFile.parent?.children ?? [])
+    .filter((f): f is TFile => f instanceof TFile && !shownPaths.has(f.path))
+    .slice(0, 20);
+
+  return { surrounding, overflow, sameDirFiles, isSuggested: false };
 }
 
 function getRecentFiles(app: App, exclude: TFile, count: number): TFile[] {

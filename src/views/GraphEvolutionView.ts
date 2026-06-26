@@ -128,7 +128,7 @@ export class GraphEvolutionView extends ItemView {
   }
 
   private setState(centerFile: TFile, mode: ViewMode): void {
-    const { surrounding, overflow, isSuggested } = getRelatedFiles(
+    const { surrounding, overflow, sameDirFiles, isSuggested } = getRelatedFiles(
       this.obsidianApp,
       centerFile
     );
@@ -137,6 +137,7 @@ export class GraphEvolutionView extends ItemView {
       centerFile,
       surroundingFiles: surrounding,
       overflowFiles: overflow,
+      sameDirFiles,
       isSuggested,
     };
   }

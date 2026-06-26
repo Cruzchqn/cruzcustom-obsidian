@@ -324,6 +324,20 @@
   min-width: 0;
 }
 
+/* Same-directory pills: dashed border + muted dot */
+.gev-dot-pill--dir {
+  border-style: dashed;
+  opacity: 0.8;
+}
+
+.gev-dot-pill--dir .gev-dot-pill__dot {
+  background: var(--color-base-35);
+}
+
+.gev-dot-pill--dir:hover .gev-dot-pill__dot {
+  background: var(--color-accent);
+}
+
 /* ---- More button ---- */
 
 .gev-more-btn {

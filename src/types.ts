@@ -7,6 +7,7 @@ export interface GraphState {
   centerFile: TFile;
   surroundingFiles: TFile[];
   overflowFiles: TFile[];
+  sameDirFiles: TFile[];
   isSuggested: boolean;
 }
 
@@ -27,4 +28,5 @@ export interface NodeCardOptions {
   isCenter: boolean;
   isSuggested: boolean;
   onNavigate: (file: TFile) => void;
+  centerFile?: TFile | null;
 }
